@@ -1,0 +1,119 @@
+import org.dreambot.api.Client;
+import org.dreambot.api.methods.Calculations;
+import org.dreambot.api.methods.container.impl.Inventory;
+import org.dreambot.api.methods.container.impl.bank.Bank;
+import org.dreambot.api.methods.container.impl.bank.BankLocation;
+import org.dreambot.api.methods.interactive.GameObjects;
+import org.dreambot.api.methods.interactive.Players;
+import org.dreambot.api.methods.map.Tile;
+import org.dreambot.api.methods.walking.impl.Walking;
+import org.dreambot.api.methods.world.World;
+import org.dreambot.api.methods.world.Worlds;
+import org.dreambot.api.methods.worldhopper.WorldHopper;
+import org.dreambot.api.script.AbstractScript;
+import org.dreambot.api.script.Category;
+import org.dreambot.api.script.ScriptManifest;
+import org.dreambot.api.utilities.Sleep;
+import org.dreambot.api.wrappers.interactive.GameObject;
+import java.awt.*;
+
+@ScriptManifest(name = "F2P runite miner", author = "ike", description = "Mines Runite in Wildy", version = 1, category = Category.MINING)
+public class runite extends AbstractScript {
+
+World world = Worlds.getRandomWorld(w -> w.isF2P() && w.getMinimumLevel() == 0);
+
+private final Tile runeTile = new Tile(3057, 3883, 0);
+private final Tile safeTile = new Tile(3069, 3880, 0);
+
+private boolean isMining() {
+return Players.getLocal().isAnimating();
+}
+
+public boolean playersNearby() {
+return Players.all(player -> player != null && !Players.getLocal().equals(player) && player.distance() < 40).size() > 0;
+}
+
+private enum State {
+MINE, HOP, BANK, RUN
+}
+
+private State getState() {
+GameObject rock = GameObjects.closest("Runite rocks");
+if (Inventory.isFull()) {
+return State.BANK;
+}
+if (Players.getLocal().isInCombat()) {
+return State.RUN;
+}
+if ((playersNearby() && runeTile.getArea(30).contains(Players.getLocal())) ||
+(runeTile.getArea(30).contains(Players.getLocal()) && !runeTile.getArea(30).contains(rock))) {
+return State.HOP;
+} else {
+return State.MINE;
+}
+}
+
+private State state = null;
+
+@Override
+public int onLoop() {
+if (!Client.isLoggedIn()) {
+return 600;
+}
+if (!Walking.isRunEnabled() && Walking.getRunEnergy() > Calculations.random(30, 70) && Inventory.isFull() && runeTile.getArea(40).contains(Players.getLocal())) {
+Walking.toggleRun();
+}
+GameObject rock = GameObjects.closest("Runite rocks");
+state = getState();
+switch (state) {
+case MINE:
+if(playersNearby()){
+state = State.HOP;
+}
+if (!runeTile.getArea(3).contains(Players.getLocal())) {
+Walking.walk(runeTile);
+} else if (runeTile.getArea(3).contains(Players.getLocal()) && runeTile.getArea(3).contains(rock)) {
+rock.interact("Mine");
+Sleep.sleepUntil(this::isMining, 3000);
+Sleep.sleepUntil(() -> playersNearby() || !Players.getLocal().isAnimating(), 7000);
+}
+return Calculations.random(500, 1000);
+case BANK:
+if (Bank.isOpen() && Inventory.contains("Runite Ore")) {
+Bank.depositAll("Runite Ore");
+sleep(1000);
+Bank.withdraw(373, 10);
+sleep(1000);
+Bank.close();
+} else if (BankLocation.FEROX_ENCLAVE.getArea(2).contains(Players.getLocal())) {
+Bank.open();
+Sleep.sleepUntil(Bank::isOpen, 2000);
+} else while (!BankLocation.FEROX_ENCLAVE.getArea(2).contains(Players.getLocal())) {
+Walking.walk(BankLocation.FEROX_ENCLAVE.getCenter());
+Sleep.sleepUntil(() -> BankLocation.FEROX_ENCLAVE.getArea(2).contains(Players.getLocal()), 5000);
+}
+break;
+case RUN:
+if (playersNearby()) {
+Walking.walk(BankLocation.FEROX_ENCLAVE.getCenter());
+Sleep.sleepUntil(() -> BankLocation.FEROX_ENCLAVE.getArea(2).contains(Players.getLocal()) || !playersNearby(), 5000);
+state = State.HOP;
+} else {
+Walking.walk(safeTile);
+}
+break;
+case HOP:
+if (!runeTile.getArea(30).contains(rock)) {
+WorldHopper.hopWorld(world);
+
+}
+}
+return Calculations.random(1000,2000);
+}
+public void onPaint(Graphics g) {
+g.setColor(Color.WHITE);
+g.setFont(new Font("Arial", Font.BOLD, 11));
+if (state != null)
+g.drawString("State: " + state, 25, 95);
+}
+}
